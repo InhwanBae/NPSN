@@ -1,2 +1,7 @@
-# NPSN
-Official Code for "Non-Probability Sampling Network for Stochastic Human Trajectory Prediction (CVPR 2022)"
+## Non-Probability Sampling Network for Stochastic Human Trajectory Prediction
+
+#### Inhwan Bae, Jin-Hwi Park and Hae-Gon Jeon
+
+Accepted to CVPR 2022
+
+comming soon!
