@@ -1,7 +1,7 @@
 ## Non-Probability Sampling Network for Stochastic Human Trajectory Prediction
 This repository contains the code for the NPSN method applied to the trajectory forecasting models.
 
-**[Non-Probability Sampling Network for Stochastic Human Trajectory Prediction](https://arxiv.org/abs/2203.13471)**
+**[Non-Probability Sampling Network for Stochastic Human Trajectory Prediction](https://inhwanbae.github.io/publication/npsn/)**
 <br>
 <a href="https://InhwanBae.github.io/">Inhwan Bae</a>,
 Jin-Hwi Park,
