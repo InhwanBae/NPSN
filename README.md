@@ -4,7 +4,7 @@ This repository contains the code for the NPSN method applied to the trajectory 
 **[Non-Probability Sampling Network for Stochastic Human Trajectory Prediction](https://inhwanbae.github.io/publication/npsn/)**
 <br>
 <a href="https://InhwanBae.github.io/">Inhwan Bae</a>,
-Jin-Hwi Park,
+Jin-Hwi Park, and
 <a href="https://scholar.google.com/citations?user=Ei00xroAAAAJ">Hae-Gon Jeon</a>
 <br>Accepted to 
 <a href="https://cvpr2022.thecvf.com/">CVPR 2022</a>
