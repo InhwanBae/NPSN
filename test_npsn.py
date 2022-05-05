@@ -5,12 +5,16 @@ import argparse
 import numpy as np
 import torch
 from tqdm import tqdm
-from torch.utils.data.dataloader import DataLoader
-from baselines.converter import get_identity
+from baselines.converter import get_sgcn_identity
 from npsn import *
 
+# Reproducibility
+torch.manual_seed(0)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
 parser = argparse.ArgumentParser()
-parser.add_argument('--baseline', default='sgcn', help='baseline network ["sgcn","stgcnn"]')
+parser.add_argument('--baseline', default='sgcn', help='baseline network ["sgcn","stgcnn","pecnet"]')
 parser.add_argument('--method', default='npsn', help='sampling method ["mc","qmc","npsn"]')
 parser.add_argument('--tag', default='npsn', help='personal tag for the model')
 parser.add_argument('--gpu_num', default='0', type=str)
@@ -22,10 +26,14 @@ if test_args.baseline == 'stgcnn':
     from baselines.stgcnn import *
 elif test_args.baseline == 'sgcn':
     from baselines.sgcn import *
+elif test_args.baseline == 'pecnet':
+    from baselines.pecnet import *
+else:
+    raise NotImplementedError
 
 
 @torch.no_grad()
-def test(model, model_npsn, loader_test, method='npsn', samples=20, trials=1):
+def test(model, model_npsn, loader_test, method='npsn', samples=20, trials=100):
     model.eval()
     model_npsn.eval()
     ade_all, fde_all, tcc_all = [], [], []
@@ -34,46 +42,133 @@ def test(model, model_npsn, loader_test, method='npsn', samples=20, trials=1):
         sobol_generator = torch.quasirandom.SobolEngine(dimension=2, scramble=True, seed=0)
 
     for batch in tqdm(loader_test, desc=loader_test.dataset.data_dir):
-        obs_traj, pred_traj_gt = [tensor.cuda() for tensor in batch[:2]]
+        if test_args.baseline == 'pecnet':
+            batch = [data.cuda(non_blocking=True) for data in batch]
+            obs_traj, pred_traj, _, _, mask, _ = batch
 
-        if test_args.baseline == 'stgcnn':
-            V_obs, A_obs, V_tr, A_tr = [tensor.cuda() for tensor in batch[-4:]]
-            V_obs_tmp = V_obs.permute(0, 3, 1, 2)
-            V_pred, _ = model(V_obs_tmp, A_obs.squeeze())
-            V_pred = V_pred.permute(0, 2, 3, 1).detach()
-        elif test_args.baseline == 'sgcn':
-            V_obs, V_tr = [tensor.cuda() for tensor in batch[-2:]]
-            identity = get_identity(V_obs.shape)
-            V_pred = model(V_obs, identity)
-            V_obs = V_obs[..., 1:]
+            x = obs_traj.permute(0, 2, 1).clone()
+            y = pred_traj.permute(0, 2, 1).clone()
 
-        mu, cov = generate_statistics_matrices(V_pred.squeeze(dim=0))
+            # starting pos is end of past, start of future. scaled down.
+            initial_pos = x[:, 7, :].clone() / 1000
 
-        if method == 'npsn':
-            loc = model_npsn(V_obs.permute(0, 2, 3, 1))
+            # shift origin and scale data
+            origin = x[:, :1, :].clone()
+            x -= origin
+            y -= origin
+            x *= 170  # hyper_params["data_scale"]
+            y *= 170  # hyper_params["data_scale"]
 
-        V_obs_traj = obs_traj.permute(0, 3, 1, 2).squeeze(dim=0)
-        V_pred_traj_gt = pred_traj_gt.permute(0, 3, 1, 2).squeeze(dim=0)
+            # reshape the data
+            device = torch.device('cuda')
+            x = x.reshape(-1, x.shape[1] * x.shape[2])
+            x = x.to(device)
+            y = y.cpu().numpy()
 
-        ade_stack, fde_stack, tcc_stack = [], [], []
+            ade_stack, fde_stack, tcc_stack = [], [], []
 
-        for trial in range(trials):
-            if method == 'mc':
-                V_pred_sample = mc_sample(mu, cov, samples)
-            elif method == 'qmc':
-                V_pred_sample = qmc_sample(mu, cov, samples, sobol_generator)
-            elif method == 'npsn':
-                V_pred_sample = purposive_sample(mu, cov, samples, loc)
-            else:
-                raise NotImplementedError
+            for trial in range(trials):
+                # NPSN
+                if method == 'qmc':
+                    sobol_generator = torch.quasirandom.SobolEngine(dimension=16, scramble=True)
+                    loc = box_muller_transform(sobol_generator.draw(samples).cuda()).unsqueeze(dim=1).expand((samples, x.size(0), 16))
+                elif method == 'npsn':
+                    loc = model_npsn(obs_traj.unsqueeze(dim=0).transpose(-1, -2), mask=mask)  # torch.Size([1, 520, 20, 16])
+                    loc = loc.squeeze(dim=0).permute(1, 0, 2)
+                    loc = box_muller_transform(loc)
 
-            # Evaluate trajectories
-            V_absl = V_pred_sample.cumsum(dim=1) + V_obs_traj[[-1], :, :]
-            ADEs, FDEs, TCCs = compute_batch_metric(V_absl, V_pred_traj_gt)
+                dest = y[:, -1, :]
+                all_guesses = []
+                all_l2_errors_dest = []
 
-            ade_stack.append(ADEs.detach().cpu().numpy())
-            fde_stack.append(FDEs.detach().cpu().numpy())
-            tcc_stack.append(TCCs.detach().cpu().numpy())
+                for n in range(samples):
+                    if method == 'mc':
+                        dest_recon = model.forward(x, initial_pos, device=device)
+                    elif method == 'qmc':
+                        dest_recon = model.forward(x, initial_pos, device=device, noise=loc[n])
+                    elif method == 'npsn':
+                        dest_recon = model.forward(x, initial_pos, device=device, noise=loc[n])
+                    else:
+                        raise NotImplementedError
+
+                    dest_recon = dest_recon.cpu().numpy()
+                    all_guesses.append(dest_recon)
+
+                    l2error_sample = np.linalg.norm(dest_recon - dest, axis=1)
+                    all_l2_errors_dest.append(l2error_sample)
+
+                all_l2_errors_dest = np.array(all_l2_errors_dest)
+                all_guesses = np.array(all_guesses)
+
+                # choosing the best guess
+                indices = np.argmin(all_l2_errors_dest, axis=0)
+                best_guess_dest = all_guesses[indices, np.arange(x.shape[0]), :]
+                best_guess_dest = torch.FloatTensor(best_guess_dest).to(device)
+
+                # using the best guess for interpolation
+                interpolated_future = model.predict(x, best_guess_dest, mask, initial_pos)
+                interpolated_future = interpolated_future.cpu().numpy()
+                best_guess_dest = best_guess_dest.cpu().numpy()
+
+                # final overall prediction
+                predicted_future = np.concatenate((interpolated_future, best_guess_dest), axis=1)
+                predicted_future = np.reshape(predicted_future, (-1, 12, 2))  # making sure
+
+                tcc = evaluate_tcc(predicted_future / 170, y / 170)
+                ADEs = np.mean(np.linalg.norm(y - predicted_future, axis=2), axis=1) / 170
+                FDEs = np.min(all_l2_errors_dest, axis=0) / 170
+                TCCs = tcc.detach().cpu().numpy()
+
+                ade_stack.append(ADEs)
+                fde_stack.append(FDEs)
+                tcc_stack.append(TCCs)
+
+        else:
+            obs_traj, pred_traj_gt = [tensor.cuda() for tensor in batch[:2]]
+
+            if test_args.baseline == 'stgcnn':
+                V_obs, A_obs, V_tr, A_tr = [tensor.cuda() for tensor in batch[-4:]]
+                V_obs_tmp = V_obs.permute(0, 3, 1, 2)
+                V_pred, _ = model(V_obs_tmp, A_obs.squeeze())
+                V_pred = V_pred.permute(0, 2, 3, 1)
+            elif test_args.baseline == 'sgcn':
+                V_obs, V_tr = [tensor.cuda() for tensor in batch[-2:]]
+                identity = get_sgcn_identity(V_obs.shape)
+                V_pred = model(V_obs, identity)
+                V_obs = V_obs[..., 1:]
+            elif test_args.baseline == 'dmrgcn':
+                V_obs, A_obs, V_tr, A_tr = [tensor.cuda() for tensor in batch[-4:]]
+                V_obs_ = V_obs.permute(0, 3, 1, 2)
+                V_pred, _ = model(V_obs_, A_obs)
+                V_pred = V_pred.permute(0, 2, 3, 1)
+
+            mu, cov = generate_statistics_matrices(V_pred.squeeze(dim=0))
+
+            if method == 'npsn':
+                loc = model_npsn(V_obs.permute(0, 2, 3, 1))
+
+            V_obs_traj = obs_traj.permute(0, 3, 1, 2).squeeze(dim=0)
+            V_pred_traj_gt = pred_traj_gt.permute(0, 3, 1, 2).squeeze(dim=0)
+
+            ade_stack, fde_stack, tcc_stack = [], [], []
+
+            for trial in range(trials):
+                if method == 'mc':
+                    V_pred_sample = mc_sample(mu, cov, samples)
+                elif method == 'qmc':
+                    V_pred_sample = qmc_sample(mu, cov, samples, sobol_generator)
+                elif method == 'npsn':
+                    V_pred_sample = purposive_sample(mu, cov, samples, loc)
+                else:
+                    raise NotImplementedError
+
+                # Evaluate trajectories
+                V_absl = V_pred_sample.cumsum(dim=1) + V_obs_traj[[-1], :, :]
+                ADEs, FDEs, TCCs = compute_batch_metric(V_absl, V_pred_traj_gt)
+
+                ade_stack.append(ADEs.detach().cpu().numpy())
+                fde_stack.append(FDEs.detach().cpu().numpy())
+                tcc_stack.append(TCCs.detach().cpu().numpy())
 
         ade_all.append(np.array(ade_stack))
         fde_all.append(np.array(fde_stack))
@@ -111,25 +206,19 @@ def main():
             model_path = './pretrained/' + test_args.baseline + '/' + args.dataset + '/val_best.pth'
             model_npsn_path = exp_path + '/val_best.pth'
 
-            dset_test = TrajectoryDataset(data_set + 'test/', obs_len=args.obs_len, pred_len=args.pred_len, skip=1)
-            loader_test = DataLoader(dset_test, batch_size=1, shuffle=False, num_workers=0)
+            # Dataloader
+            loader_test, _ = get_dataloader(data_set, 'test', args.obs_len, args.pred_len, args.batch_size)
 
-            if test_args.baseline == 'stgcnn':
-                model = STGCNN(n_stgcnn=1, n_txpcnn=5, output_feat=5, kernel_size=3, seq_len=8, pred_seq_len=12).cuda()
-            elif test_args.baseline == 'sgcn':
-                model = SGCN(number_asymmetric_conv_layer=7, embedding_dims=64, number_gcn_layers=1, dropout=0,
-                             obs_len=8, pred_len=12, n_tcn=5, out_dims=5).cuda()
-            else:
-                raise NotImplementedError
-
+            # Load backbone network and NPSN
+            model = get_model().cuda()
             model.load_state_dict(torch.load(model_path))
-            model_npsn = NPSN(t_obs=args.obs_len, s=2, n=args.num_samples).cuda()
+            model_npsn = NPSN(t_obs=args.obs_len, s=get_latent_dim(), n=args.num_samples).cuda()
             model_npsn.load_state_dict(torch.load(model_npsn_path))
 
             ADE, FDE, TCC = test(model, model_npsn, loader_test, test_args.method.lower(), args.num_samples)
             ADE_ls.append(ADE), FDE_ls.append(FDE), TCC_ls.append(TCC)
-            print("Method: {} N: {} ADE: {:.8f} FDE: {:.8f} TCC: {:.8f}".format(test_args.method, args.num_samples,
-                                                                                ADE, FDE, TCC))
+            print("Method: {} N: {} ADE: {:.8f} FDE: {:.8f} TCC: {:.8f}".format(test_args.method.upper(),
+                                                                                args.num_samples, ADE, FDE, TCC))
 
     print("*" * 50)
     print("AVG ADE: {:.8f} AVG FDE: {:.8f} AVG TCC: {:.8f}".format(sum(ADE_ls) / 5, sum(FDE_ls) / 5, sum(TCC_ls) / 5))

@@ -64,6 +64,23 @@ def compute_batch_metric(pred, gt):
     return ADEs, FDEs, TCCs
 
 
+def evaluate_tcc(pred, gt):
+    """Get ADE, FDE, TCC scores for each pedestrian"""
+    pred, gt = torch.FloatTensor(pred).permute(1, 0, 2), torch.FloatTensor(gt).permute(1, 0, 2)
+    pred_best = pred
+    pred_gt_stack = torch.stack([pred_best.permute(1, 0, 2), gt.permute(1, 0, 2)], dim=0)
+    pred_gt_stack = pred_gt_stack.permute(3, 1, 0, 2)
+    covariance = pred_gt_stack - pred_gt_stack.mean(dim=-1, keepdim=True)
+    factor = 1 / (covariance.shape[-1] - 1)
+    covariance = factor * covariance @ covariance.transpose(-1, -2)
+    variance = covariance.diagonal(offset=0, dim1=-2, dim2=-1)
+    stddev = variance.sqrt()
+    corrcoef = covariance / stddev.unsqueeze(-1) / stddev.unsqueeze(-2)
+    corrcoef.clip_(-1, 1)
+    corrcoef[torch.isnan(corrcoef)] = 0
+    TCCs = corrcoef[:, :, 0, 1].mean(dim=0)
+    return TCCs
+
 
 def data_sampler(V_obs, V_tr, A_obs=None, A_tr=None, scale=True, rotation=True, flip=True):
     if scale:
@@ -102,10 +119,10 @@ def random_flip(V_obs, V_tr, A_obs, A_tr):
         V_obs[..., -2:] = flip[:, :8]
         V_tr = flip[:, 8:]
         if A_obs is not None:
-            flip = torch.cat([A_obs, A_tr], dim=1)
-            flip = torch.flip(flip, dims=[1])
-            A_obs = flip[:, :8]
-            A_tr = flip[:, 8:]
+            flip = torch.cat([A_obs, A_tr], dim=-3)
+            flip = torch.flip(flip, dims=[-3])
+            A_obs = flip[..., :8, :, :]
+            A_tr = flip[..., 8:, :, :]
     return V_obs, V_tr, A_obs, A_tr
 
 

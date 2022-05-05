@@ -5,8 +5,7 @@ import argparse
 import numpy as np
 import torch
 from tqdm import tqdm
-from torch.utils.data.dataloader import DataLoader
-from baselines.converter import get_identity
+from baselines.converter import get_sgcn_identity
 from npsn import *
 
 # Reproducibility
@@ -20,7 +19,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--obs_len', type=int, default=8)
 parser.add_argument('--pred_len', type=int, default=12)
 parser.add_argument('--dataset', default='zara2', help='scene ["eth","hotel","univ","zara1","zara2"]')
-parser.add_argument('--baseline', default='sgcn', help='baseline network ["sgcn","stgcnn"]')
+parser.add_argument('--baseline', default='sgcn', help='baseline network ["sgcn","stgcnn","pecnet"]')
 parser.add_argument('--batch_size', type=int, default=512, help='minibatch size')
 parser.add_argument('--num_epochs', type=int, default=128, help='number of epochs')
 parser.add_argument('--num_samples', type=int, default=20, help='number of samples for npsn')
@@ -41,6 +40,10 @@ if args.baseline == 'stgcnn':
     from baselines.stgcnn import *
 elif args.baseline == 'sgcn':
     from baselines.sgcn import *
+elif args.baseline == 'pecnet':
+    from baselines.pecnet import *
+else:
+    raise NotImplementedError
 
 
 def train(epoch, model, model_npsn, optimizer_npsn, loader_train):
@@ -54,21 +57,69 @@ def train(epoch, model, model_npsn, optimizer_npsn, loader_train):
             optimizer_npsn.zero_grad()
 
         if args.baseline == 'stgcnn':
-            V_obs, V_tr, A_obs, A_tr = data_sampler(*[tensor.cuda() for tensor in batch[[-4, -2, -3, -1]]])
+            V_obs, V_tr, A_obs, A_tr = data_sampler(*[batch[idx].cuda() for idx in [-4, -2, -3, -1]])
             with torch.no_grad():
                 V_obs_tmp = V_obs.permute(0, 3, 1, 2)
                 V_pred, _ = model(V_obs_tmp, A_obs.squeeze())
                 V_pred = V_pred.permute(0, 2, 3, 1).detach()
         elif args.baseline == 'sgcn':
             V_obs, V_tr, _, _ = data_sampler(*[tensor.cuda() for tensor in batch[-2:]])
-            identity = get_identity(V_obs.shape)
+            identity = get_sgcn_identity(V_obs.shape)
             with torch.no_grad():
                 V_pred = model(V_obs, identity).detach()
             V_obs = V_obs[..., 1:]
+        elif args.baseline == 'dmrgcn':
+            V_obs, V_tr, A_obs, A_tr = data_sampler(*[batch[idx].cuda() for idx in [-4, -2, -3, -1]])
+            with torch.no_grad():
+                V_obs_ = V_obs.permute(0, 3, 1, 2)
+                V_pred, _ = model(V_obs_, A_obs)
+                V_pred = V_pred.permute(0, 2, 3, 1).detach()
+        elif args.baseline == 'pecnet':
+            batch = [data.cuda(non_blocking=True) for data in batch]
+            obs_traj, pred_traj, _, _, mask, _ = batch
+            obs_, pred_, _, _ = data_sampler(obs_traj.permute(2, 0, 1).unsqueeze(dim=0),
+                                             pred_traj.permute(2, 0, 1).unsqueeze(dim=0))
 
-        mu, cov = generate_statistics_matrices(V_pred.squeeze(dim=0))
-        loc = model_npsn(V_obs.permute(0, 2, 3, 1))
-        loss_dist, loss_disc = model_npsn.get_loss(loc, mu, cov, V_tr.permute(0, 2, 3, 1))
+            obs_traj, pred_traj = obs_.squeeze(dim=0).permute(1, 2, 0), pred_.squeeze(dim=0).permute(1, 2, 0)
+
+            # NPSN
+            loc = model_npsn(obs_traj.unsqueeze(dim=0).transpose(-1, -2), mask=mask)
+            loc = loc.squeeze(dim=0).permute(1, 0, 2)
+            loc = box_muller_transform(loc)
+
+            x = obs_traj.permute(0, 2, 1).clone()
+            y = pred_traj.permute(0, 2, 1).clone()
+
+            # starting pos is end of past, start of future. scaled down.
+            initial_pos = x[:, 7, :].clone() / 1000
+
+            # shift origin and scale data
+            origin = x[:, :1, :].clone()
+            x -= origin
+            y -= origin
+            x *= 170  # hyper_params["data_scale"]
+
+            # reshape the data
+            device = torch.device('cuda')
+            x = x.reshape(-1, x.shape[1] * x.shape[2])
+            x = x.to(device)
+
+            all_guesses = []
+            for n in range(args.num_samples):
+                dest_recon = model.forward(x, initial_pos, device=device, noise=loc[n])
+                all_guesses.append(dest_recon)
+            all_guesses = torch.stack(all_guesses, dim=0) / 170  # hyper_params["data_scale"]
+
+        # Calculate loss
+        if args.baseline == 'pecnet':
+            loss_dist = (all_guesses - y[:, -1].unsqueeze(dim=0)).norm(p=2, dim=-1).min(dim=0)[0].mean()
+            loss_disc = (loc.unsqueeze(dim=0) - loc.unsqueeze(dim=1)).norm(p=2, dim=-1)
+            loss_disc = loss_disc.topk(k=2, dim=0, largest=False, sorted=True)[0][1].log().mul(-1).mean()
+
+        else:
+            mu, cov = generate_statistics_matrices(V_pred.squeeze(dim=0))
+            loc = model_npsn(V_obs.permute(0, 2, 3, 1))
+            loss_dist, loss_disc = model_npsn.get_loss(loc, mu, cov, V_tr.permute(0, 2, 3, 1))
         loss = loss_dist * 1.0 + loss_disc * 0.01
         loss.backward()
         loss_batch += loss.item()
@@ -95,28 +146,73 @@ def valid(epoch, model, model_npsn, checkpoint_dir, loader_val):
             V_obs, A_obs, V_tr, A_tr = [tensor.cuda() for tensor in batch[-4:]]
             V_obs_tmp = V_obs.permute(0, 3, 1, 2)
             V_pred, _ = model(V_obs_tmp, A_obs.squeeze())
-            V_pred = V_pred.permute(0, 2, 3, 1).detach()
+            V_pred = V_pred.permute(0, 2, 3, 1)
         elif args.baseline == 'sgcn':
             V_obs, V_tr = [tensor.cuda() for tensor in batch[-2:]]
-            identity = get_identity(V_obs.shape)
+            identity = get_sgcn_identity(V_obs.shape)
             V_pred = model(V_obs, identity)
             V_obs = V_obs[..., 1:]
+        elif args.baseline == 'dmrgcn':
+            V_obs, A_obs, V_tr, A_tr = [tensor.cuda() for tensor in batch[-4:]]
+            V_obs_ = V_obs.permute(0, 3, 1, 2)
+            V_pred, _ = model(V_obs_, A_obs)
+            V_pred = V_pred.permute(0, 2, 3, 1)
+        elif args.baseline == 'pecnet':
+            batch = [data.cuda(non_blocking=True) for data in batch]
+            obs_traj, pred_traj, _, _, mask, _ = batch
 
-        mu, cov = generate_statistics_matrices(V_pred.squeeze(dim=0))
-        loc = model_npsn(V_obs.permute(0, 2, 3, 1))
+            # NPSN
+            loc = model_npsn(obs_traj.unsqueeze(dim=0).transpose(-1, -2), mask=mask)
+            loc = loc.squeeze(dim=0).permute(1, 0, 2)
+            loc = box_muller_transform(loc)
 
-        V_obs_traj = obs_traj.permute(0, 3, 1, 2).squeeze(dim=0)
-        V_pred_traj_gt = pred_traj_gt.permute(0, 3, 1, 2).squeeze(dim=0)
+            x = obs_traj.permute(0, 2, 1).clone()
+            y = pred_traj.permute(0, 2, 1).clone()
 
-        # Randomly sampling predict trajectories
-        V_pred_sample = purposive_sample(mu, cov, loc.size(2), loc)
+            # starting pos is end of past, start of future. scaled down.
+            initial_pos = x[:, 7, :].clone() / 1000
 
-        # Evaluate trajectories
-        V_absl = V_pred_sample.cumsum(dim=1) + V_obs_traj[[-1], :, :]
-        ADEs, FDEs, TCCs = compute_batch_metric(V_absl, V_pred_traj_gt)
+            # shift origin and scale data
+            origin = x[:, :1, :].clone()
+            x -= origin
+            y -= origin
+            x *= 170  # hyper_params["data_scale"]
 
-        loss_batch += FDEs.sum().item()
-        loader_len += FDEs.size(0)
+            # reshape the data
+            device = torch.device('cuda')
+            x = x.reshape(-1, x.shape[1] * x.shape[2])
+            x = x.to(device)
+
+            all_guesses = []
+
+            for n in range(args.num_samples):
+                dest_recon = model.forward(x, initial_pos, device=device, noise=loc[n])
+                all_guesses.append(dest_recon)
+
+            all_guesses = torch.stack(all_guesses, dim=0) / 170  # hyper_params["data_scale"]
+
+        # Calculate metrics
+        if args.baseline == 'pecnet':
+            loss_dist = (all_guesses - y[:, -1].unsqueeze(dim=0)).norm(p=2, dim=-1).min(dim=0)[0].sum()
+            loss_batch += loss_dist.item()
+            loader_len += loc.size(1)
+        else:
+
+            mu, cov = generate_statistics_matrices(V_pred.squeeze(dim=0))
+            loc = model_npsn(V_obs.permute(0, 2, 3, 1))
+
+            V_obs_traj = obs_traj.permute(0, 3, 1, 2).squeeze(dim=0)
+            V_pred_traj_gt = pred_traj_gt.permute(0, 3, 1, 2).squeeze(dim=0)
+
+            # Randomly sampling predict trajectories
+            V_pred_sample = purposive_sample(mu, cov, loc.size(2), loc)
+
+            # Evaluate trajectories
+            V_absl = V_pred_sample.cumsum(dim=1) + V_obs_traj[[-1], :, :]
+            ADEs, FDEs, TCCs = compute_batch_metric(V_absl, V_pred_traj_gt)
+
+            loss_batch += FDEs.sum().item()
+            loader_len += FDEs.size(0)
 
     metrics['val_loss'].append(loss_batch / loader_len)
 
@@ -134,35 +230,28 @@ def main(args):
     model_path = './pretrained/' + args.baseline + '/' + args.dataset + '/val_best.pth'
     checkpoint_dir = './checkpoints/' + args.tag + '/' + args.dataset + '/'
 
-    dset_train = TrajectoryDataset(data_set + 'train/', obs_len=args.obs_len, pred_len=args.pred_len, skip=1)
-    loader_train = DataLoader(dset_train, batch_size=1, shuffle=True, num_workers=0)
-    dset_val = TrajectoryDataset(data_set + 'val/', obs_len=args.obs_len, pred_len=args.pred_len, skip=1)
-    loader_val = DataLoader(dset_val, batch_size=1, shuffle=False, num_workers=0)
-
-    # Load baseline network model and npsn
-    if args.baseline == 'stgcnn':
-        model = STGCNN(n_stgcnn=1, n_txpcnn=5, output_feat=5, kernel_size=3, seq_len=8, pred_seq_len=12).cuda()
-    elif args.baseline == 'sgcn':
-        model = SGCN(number_asymmetric_conv_layer=7, embedding_dims=64, number_gcn_layers=1, dropout=0,
-                     obs_len=8, pred_len=12, n_tcn=5, out_dims=5).cuda()
-    else:
-        raise NotImplementedError
-
-    model.load_state_dict(torch.load(model_path))
-    model.eval()
-    model_npsn = NPSN(t_obs=args.obs_len, s=2, n=args.num_samples).cuda()
-    print('{} parameters:'.format(args.baseline), count_parameters(model))
-    print('npsn parameters:', count_parameters(model_npsn))
-
-    optimizer_npsn = torch.optim.AdamW(model_npsn.parameters(), lr=args.lr)
-    if args.use_lrschd:
-        scheduler_npsn = torch.optim.lr_scheduler.StepLR(optimizer_npsn, step_size=args.lr_sh_rate, gamma=0.5)
-
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
 
     with open(checkpoint_dir + 'args.pkl', 'wb') as fp:
         pickle.dump(args, fp)
+
+    # Dataloader
+    loader_train, _ = get_dataloader(data_set, 'train', args.obs_len, args.pred_len, args.batch_size)
+    loader_val, bs = get_dataloader(data_set, 'val', args.obs_len, args.pred_len, args.batch_size)
+    args.batch_size = bs  # Change batch size for custom BatchSampler
+
+    # Load backbone network and NPSN
+    model = get_model().cuda()
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+    model_npsn = NPSN(t_obs=args.obs_len, s=get_latent_dim(), n=args.num_samples).cuda()
+    print('{} parameters:'.format(args.baseline.upper()), count_parameters(model))
+    print('NPSN parameters:', count_parameters(model_npsn))
+
+    optimizer_npsn = torch.optim.AdamW(model_npsn.parameters(), lr=args.lr)
+    if args.use_lrschd:
+        scheduler_npsn = torch.optim.lr_scheduler.StepLR(optimizer_npsn, step_size=args.lr_sh_rate, gamma=0.5)
 
     print('Data and model loaded')
     print('Checkpoint dir:', checkpoint_dir)
@@ -176,9 +265,9 @@ def main(args):
 
         print(" ")
         print("Dataset: {0}, Epoch: {1}".format(args.dataset, epoch))
-        print("Train_loss: {0}, Val_los: {1}".format(metrics['train_loss'][-1], metrics['val_loss'][-1]))
-        print("Min_val_epoch: {0}, Min_val_loss: {1}".format(constant_metrics['min_val_epoch'],
-                                                             constant_metrics['min_val_loss']))
+        print("Train_loss: {0:.8f}, Val_los: {1:.8f}".format(metrics['train_loss'][-1], metrics['val_loss'][-1]))
+        print("Min_val_epoch: {0}, Min_val_loss: {1:.8f}".format(constant_metrics['min_val_epoch'],
+                                                                 constant_metrics['min_val_loss']))
         print(" ")
 
         with open(checkpoint_dir + 'constant_metrics.pkl', 'wb') as fp:

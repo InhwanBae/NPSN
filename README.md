@@ -29,8 +29,12 @@ Jin-Hwi Park, and
 <br>All models were trained and tested on Ubuntu 18.04 with Python 3.7 and PyTorch 1.7.1 with CUDA 10.1.
 
 **Dataset**
-<br>Preprocessed [ETH](https://web.archive.org/web/20190715200622/https://vision.ee.ethz.ch/datasets_extra/ewap_dataset_full.tgz) and [UCY](https://graphics.cs.ucy.ac.cy/research/downloads/crowd-data) datasets are included in this repository, under `./dataset/`. 
+<br>Preprocessed [**ETH**](https://web.archive.org/web/20190715200622/https://vision.ee.ethz.ch/datasets_extra/ewap_dataset_full.tgz) and [**UCY**](https://graphics.cs.ucy.ac.cy/research/downloads/crowd-data) datasets are included in this repository, under `./dataset/`. 
 The train/validation/test splits are the same as those fond in [Social-GAN](https://github.com/agrimgupta92/sgan).
+
+**Baseline models**
+<br>This repository supports three baseline models: [**Social-STGCNN**](https://arxiv.org/abs/2002.11927), [**SGCN**](https://arxiv.org/abs/2104.01528) and [**PECNet**](https://arxiv.org/abs/2004.02025).
+We have included model source codes from their official GitHub in the `./baselines` folder. 
 
 
 ### Train NPSN
@@ -70,13 +74,24 @@ All the experiments in this work are performed with *seed=0*, strictly following
 ## Model Evaluation
 ### Pretrained Models
 **Baseline models**
-<br>
-We use model source codes and pretrained weights from their official GitHub.
+<br>We use model source codes and pretrained weights from their official GitHub.
 Pretrained baseline models are included in the `./pretrained/` folder. 
+<details>
+  <summary>Important note for PECNet (Click to expand)</summary>
+
+  * **Data Split**
+  <br>For an apple-to-apple comparison, we used the *train-validation-test* split of Social-GAN. We used the same data split strategy for all other baseline models.<br>
+
+  * **Dataloader**
+  <br>We used Social-GAN's dataloader instead of their pre-processed pickle file. To work similarly to PECNet's original dataloader, we wrote codes for custom [`batch-sampler`](https://github.com/InhwanBae/NPSN/blob/main/baselines/pecnet/utils.py#L26-L78) and [`collate-function`](https://github.com/InhwanBae/NPSN/blob/main/baselines/pecnet/utils.py#L10-L23).
+
+  * **Data Types**
+  <br>We used *torch.FloatTensor* instead of *torch.DoubleTensor* as the data type of the model. We checked that the performance difference between them was negligible.
+</details>
+
 
 **NPSN method**
-<br>
-We have included pretrained NPSN models for each baseline model in the `./checkpoints/` folder.
+<br>We have included pretrained NPSN models for each baseline model in the `./checkpoints/` folder.
 
 
 ### Evaluate NPSN
@@ -104,5 +119,5 @@ If you find this code useful for your research, please cite our paper :)
 ```
 
 ### Acknowledgement
-Part of our code is borrowed from [Social-STGCNN](https://github.com/abduallahmohamed/Social-STGCNN/tree/ebd57aaf34d84763825d05cf9d4eff738d8c96bb) and [SGCN](https://github.com/shuaishiliu/SGCN/tree/0ff25cedc04852803787196e83c0bb941d724fc2). 
+Part of our code is borrowed from [Social-STGCNN](https://github.com/abduallahmohamed/Social-STGCNN/tree/ebd57aaf34d84763825d05cf9d4eff738d8c96bb), [SGCN](https://github.com/shuaishiliu/SGCN/tree/0ff25cedc04852803787196e83c0bb941d724fc2) and [PECNet](https://github.com/HarshayuGirase/Human-Path-Prediction/tree/master/PECNet). 
 We thank the authors for releasing their code and models.
