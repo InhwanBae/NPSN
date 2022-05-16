@@ -28,7 +28,7 @@ def model_forward_pre_hook(batch_data, data_sampler=None):
         V_obs, V_tr, A_obs, A_tr = data_sampler(*[batch_data[idx].cuda() for idx in [-4, -2, -3, -1]])
     else:
         V_obs, A_obs, V_tr, A_tr = [tensor.cuda() for tensor in batch_data[-4:]]
-    return
+    return V_obs, A_obs, V_tr, A_tr
 
 
 def model_forward():

@@ -29,12 +29,12 @@ Jin-Hwi Park, and
 <br>All models were trained and tested on Ubuntu 18.04 with Python 3.7 and PyTorch 1.7.1 with CUDA 10.1.
 
 **Dataset**
-<br>Preprocessed [**ETH**](https://web.archive.org/web/20190715200622/https://vision.ee.ethz.ch/datasets_extra/ewap_dataset_full.tgz) and [**UCY**](https://graphics.cs.ucy.ac.cy/research/downloads/crowd-data) datasets are included in this repository, under `./dataset/`. 
+<br>Preprocessed [ETH](https://web.archive.org/web/20190715200622/https://vision.ee.ethz.ch/datasets_extra/ewap_dataset_full.tgz) and [UCY](https://graphics.cs.ucy.ac.cy/research/downloads/crowd-data) datasets are included in this repository, under `./dataset/`. 
 The train/validation/test splits are the same as those fond in [Social-GAN](https://github.com/agrimgupta92/sgan).
 
 **Baseline models**
 <br>This repository supports three baseline models: [**Social-STGCNN**](https://arxiv.org/abs/2002.11927), [**SGCN**](https://arxiv.org/abs/2104.01528) and [**PECNet**](https://arxiv.org/abs/2004.02025).
-We have included model source codes from their official GitHub in the `./baselines` folder. 
+We have included model source codes from their official GitHub in the `./baselines/` folder. 
 
 
 ### Train NPSN
@@ -53,7 +53,7 @@ We provide additional arguments for experiments:
 # Examples
 ./train.sh -b sgcn -d "hotel" -i "1"
 ./train.sh -t exp1 -b stgcnn -d "hotel" -i "1"
-./train.sh -t npsn -b sgcn -d "eth hotel univ zara1 zara2" -i "0 0 0 0 0"
+./train.sh -t npsn -b pecnet -d "eth hotel univ zara1 zara2" -i "0 0 0 0 0"
 ```
 
 If you want to train the model with custom hyper-parameters, use `train_npsn.py` instead of the script file.
@@ -77,10 +77,10 @@ All the experiments in this work are performed with *seed=0*, strictly following
 <br>We use model source codes and pretrained weights from their official GitHub.
 Pretrained baseline models are included in the `./pretrained/` folder. 
 <details>
-  <summary>Important note for PECNet (Click to expand)</summary>
+  <summary><b>Important note for PECNet (Click to expand)</b></summary>
 
   * **Data Split**
-  <br>For an apple-to-apple comparison, we used the *train-validation-test* split of Social-GAN. We used the same data split strategy for all other baseline models.<br>
+  <br>For an apple-to-apple comparison, we used the *train-validation-test* split of Social-GAN. We used the same data split strategy for all other baseline models.
 
   * **Dataloader**
   <br>We used Social-GAN's dataloader instead of their pre-processed pickle file. To work similarly to PECNet's original dataloader, we wrote codes for custom [`batch-sampler`](https://github.com/InhwanBae/NPSN/blob/main/baselines/pecnet/utils.py#L26-L78) and [`collate-function`](https://github.com/InhwanBae/NPSN/blob/main/baselines/pecnet/utils.py#L10-L23).
@@ -88,7 +88,6 @@ Pretrained baseline models are included in the `./pretrained/` folder.
   * **Data Types**
   <br>We used *torch.FloatTensor* instead of *torch.DoubleTensor* as the data type of the model. We checked that the performance difference between them was negligible.
 </details>
-
 
 **NPSN method**
 <br>We have included pretrained NPSN models for each baseline model in the `./checkpoints/` folder.
