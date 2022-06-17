@@ -9,8 +9,10 @@ Jin-Hwi Park, and
 <br>Accepted to 
 <a href="https://cvpr2022.thecvf.com/">CVPR 2022</a>
 
-<br>
-<div align='center'><img src="img/NPSN.svg" width=100%></div>
+<div align='center'>
+  <img src="img/npsn-teaser-animated.png" width=45%'>
+  <img src="img/npsn-teaser-sampling.png" width=45%'>
+</div>
 
 
 ## NPSN method
@@ -19,8 +21,7 @@ Jin-Hwi Park, and
 * Non-Probability Sampling Network (NPSN), a very small network that generates purposive sample sequences, <br> can significantly improve both the prediction accuracy (up to 60%) and reliability.
 * Simply replacing one line of code on random sampling([`click`](https://github.com/InhwanBae/NPSN/blob/main/npsn/sampler.py#L27)) with our NPSN([`here`](https://github.com/InhwanBae/NPSN/blob/main/npsn/sampler.py#L39))!
 
-<div align='center'><img src="img/sampling.svg" width=100%></div>
-<div style="text-align: right"> (N=20, Prediction results with PECNet on SDD dataset, Red box: Large bias of sampling) </div>
+<div align='center'><img src="img/npsn-model.svg" width=100%></div>
 
 
 ## Model Training

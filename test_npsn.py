@@ -92,7 +92,6 @@ def test(model, model_npsn, loader_test, method='npsn', samples=20, trials=100):
 
             ade_stack, fde_stack, tcc_stack = [], [], []
             for trial in range(trials):
-                # NPSN
                 if method == 'qmc':
                     sobol_generator = torch.quasirandom.SobolEngine(dimension=16, scramble=True)
                     loc = box_muller_transform(sobol_generator.draw(samples).cuda()).unsqueeze(dim=1).expand((samples, x.size(0), 16))
