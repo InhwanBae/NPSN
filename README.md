@@ -10,8 +10,8 @@ Jin-Hwi Park, and
 <a href="https://cvpr2022.thecvf.com/">CVPR 2022</a>
 
 <div align='center'>
-  <img src="img/npsn-teaser-animated.png" width=45%'>
-  <img src="img/npsn-teaser-sampling.png" width=45%'>
+  <img src="img/npsn-teaser-animated.png" width=45%>
+  <img src="img/npsn-teaser-sampling.png" width=45%>
 </div>
 
 
@@ -106,8 +106,14 @@ python test_npsn.py --baseline sgcn --tag npsn-sgcn --method qmc --gpu_num 1
 python test_npsn.py --baseline sgcn --tag npsn-sgcn --method npsn --gpu_num 2
 ```
 
+
 ## Citation
-If you find this code useful for your research, please cite our paper :)
+If you find this code useful for your research, please cite our papers :)
+
+[**`DMRGCN (AAAI'21)`**](https://github.com/InhwanBae/DMRGCN) **|** 
+[**`NPSN (CVPR'22)`**](https://github.com/InhwanBae/NPSN) **|** 
+[**`GP-Graph (ECCV'22)`**](https://github.com/InhwanBae/GPGraph) **|** 
+[**`Graph-TERN (AAAI'23)`**](https://github.com/InhwanBae/GraphTERN)
 
 ```bibtex
 @inproceedings{bae2022npsn,
@@ -117,6 +123,32 @@ If you find this code useful for your research, please cite our paper :)
   year={2022}
 }
 ```
+<details>
+  <summary>More Information (Click to expand)</summary>
+
+```bibtex
+@article{bae2021dmrgcn,
+  title={Disentangled Multi-Relational Graph Convolutional Network for Pedestrian Trajectory Prediction},
+  author={Bae, Inhwan and Jeon, Hae-Gon},
+  journal={Proceedings of the AAAI Conference on Artificial Intelligence},
+  year={2021}
+}
+
+@inproceedings{bae2022gpgraph,
+  title={Learning Pedestrian Group Representations for Multi-modal Trajectory Prediction},
+  author={Bae, Inhwan and Park, Jin-Hwi and Jeon, Hae-Gon},
+  booktitle={Proceedings of the European Conference on Computer Vision},
+  year={2022}
+}
+
+@article{bae2023graphtern,
+  title={A Set of Control Points Conditioned Pedestrian Trajectory Prediction},
+  author={Bae, Inhwan and Jeon, Hae-Gon},
+  journal={Proceedings of the AAAI Conference on Artificial Intelligence},
+  year={2023}
+}
+```
+</details>
 
 ### Acknowledgement
 Part of our code is borrowed from [Social-STGCNN](https://github.com/abduallahmohamed/Social-STGCNN/tree/ebd57aaf34d84763825d05cf9d4eff738d8c96bb), [SGCN](https://github.com/shuaishiliu/SGCN/tree/0ff25cedc04852803787196e83c0bb941d724fc2) and [PECNet](https://github.com/HarshayuGirase/Human-Path-Prediction/tree/master/PECNet). 
