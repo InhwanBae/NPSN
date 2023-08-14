@@ -149,10 +149,10 @@ If you find this code useful for your research, please cite our trajectory predi
   year={2023}
 }
 
-@article{bae2023eigentrajectory,
+@inproceedings{bae2023eigentrajectory,
   title={EigenTrajectory: Low-Rank Descriptors for Multi-Modal Trajectory Forecasting},
   author={Bae, Inhwan and Oh, Jean and Jeon, Hae-Gon},
-  journal={Proceedings of the IEEE/CVF International Conference on Computer Vision},
+  booktitle={Proceedings of the IEEE/CVF International Conference on Computer Vision},
   year={2023}
 }
 ```
