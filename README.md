@@ -15,7 +15,7 @@ Jin-Hwi Park, and
 </div>
 
 
-## NPSN method
+## 🎲 NPSN method 🎲
 * Inferences of all stochastic models are biased toward the random sampling, <br> fail to generate a set of realistic paths from finite samples.
 * Quasi-Monte Carlo method, ensuring uniform coverage on the sampling space, <br>improves all the multimodal prediction results.
 * Non-Probability Sampling Network (NPSN), a very small network that generates purposive sample sequences, <br> can significantly improve both the prediction accuracy (up to 60%) and reliability.
@@ -107,7 +107,7 @@ python test_npsn.py --baseline sgcn --tag npsn-sgcn --method npsn --gpu_num 2
 ```
 
 
-## Citation
+## 📖 Citation
 If you find this code useful for your research, please cite our trajectory prediction papers :)
 
 [**`DMRGCN (AAAI'21)`**](https://github.com/InhwanBae/DMRGCN) **|** 
