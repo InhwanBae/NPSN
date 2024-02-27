@@ -17,6 +17,7 @@
 </p>
 
 <div align='center'>
+  <br>
   <img src="img/npsn-teaser-animated.png" width=45%>
   <img src="img/npsn-teaser-sampling.png" width=45%>
 </div>
